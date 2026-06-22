@@ -152,9 +152,15 @@ function renderValidMoves() {
         const moveEl = document.createElement('div');
         
         const targetPiece = state.board.board[move[0]][move[1]];
-        moveEl.className = `valid-move ${targetPiece ? 'capture' : ''}`;
+        const isCapture = !!targetPiece;
+        moveEl.className = `valid-move ${isCapture ? 'capture' : ''}`;
         moveEl.style.left = `${x}px`;
         moveEl.style.top = `${y}px`;
+        
+        if (isCapture) {
+            const targetPieceName = getPieceName(targetPiece);
+            moveEl.title = `可吃掉: ${targetPieceName}`;
+        }
         
         moveEl.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -163,6 +169,14 @@ function renderValidMoves() {
         
         elements.validMovesContainer.appendChild(moveEl);
     });
+}
+
+function getPieceName(piece) {
+    const names = {
+        'rK': '帅', 'rA': '仕', 'rB': '相', 'rN': '马', 'rR': '车', 'rC': '炮', 'rP': '兵',
+        'bK': '将', 'bA': '士', 'bB': '象', 'bN': '马', 'bR': '车', 'bC': '炮', 'bP': '卒'
+    };
+    return names[piece] || piece;
 }
 
 function updateGameInfo() {
@@ -212,14 +226,12 @@ async function handlePieceClick(piece, event) {
 
     if (state.isAIThinking) return;
 
-    if (state.gameMode === 'pvp' && piece.color !== state.humanColor && !state.selectedPiece) {
+    if (state.selectedPiece && state.validMoves.some(m => m[0] === piece.row && m[1] === piece.col)) {
+        await handleMoveClick(piece.row, piece.col);
         return;
     }
 
     if (state.gameMode === 'pvp' && piece.color !== state.humanColor) {
-        if (state.selectedPiece && state.validMoves.some(m => m[0] === piece.row && m[1] === piece.col)) {
-            await handleMoveClick(piece.row, piece.col);
-        }
         return;
     }
 
@@ -259,12 +271,18 @@ async function handlePieceClick(piece, event) {
 async function handleMoveClick(toRow, toCol) {
     if (!state.selectedPiece || state.isAIThinking) return;
 
+    const fromRow = state.selectedPiece.row;
+    const fromCol = state.selectedPiece.col;
+    const pieceName = state.selectedPiece.name;
+    const pieceColor = state.selectedPiece.color;
+    const playerName = pieceColor === 'red' ? '红方' : '黑方';
+
     showLoading('执行走法...');
     
     try {
         const response = await apiCall('/move', 'POST', {
-            from_row: state.selectedPiece.row,
-            from_col: state.selectedPiece.col,
+            from_row: fromRow,
+            from_col: fromCol,
             to_row: toRow,
             to_col: toCol
         });
@@ -272,19 +290,22 @@ async function handleMoveClick(toRow, toCol) {
         if (response.success) {
             state.board = response;
             state.lastMove = {
-                from: [state.selectedPiece.row, state.selectedPiece.col],
+                from: [fromRow, fromCol],
                 to: [toRow, toCol]
             };
             
             if (response.captured) {
-                if (state.selectedPiece.color === 'red') {
+                if (pieceColor === 'red') {
                     state.capturedPieces.red.push(response.captured);
                 } else {
                     state.capturedPieces.black.push(response.captured);
                 }
             }
             
-            addMessage(response.message, 'success');
+            const captureText = response.captured ? `，吃掉 ${response.captured}` : '';
+            const moveMsg = `${playerName}: ${pieceName} 从 (${fromRow},${fromCol}) 走到 (${toRow},${toCol})${captureText}`;
+            addMessage(moveMsg, 'success');
+            
             updateGameInfo();
             updateCapturedPieces();
             
@@ -330,7 +351,14 @@ async function makeAIMove() {
                 state.capturedPieces.black.push(response.move.captured);
             }
             
-            addMessage(response.message, 'info');
+            const fromR = response.move.from[0];
+            const fromC = response.move.from[1];
+            const toR = response.move.to[0];
+            const toC = response.move.to[1];
+            const captureText = response.move.captured ? `，吃掉 ${response.move.captured}` : '';
+            const aiMsg = `AI(黑方): ${response.move.piece} 从 (${fromR},${fromC}) 走到 (${toR},${toC})${captureText}`;
+            addMessage(aiMsg, 'info');
+            
             updateGameInfo();
             updateCapturedPieces();
             renderBoard();
